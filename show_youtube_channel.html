@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📺</text></svg>"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
+    <link
+      href="https://api.fontshare.com/v2/css?f[]=satoshi@1&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/style.css" />
+    <title>Youtube Sync</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue-router@4.0.15/dist/vue-router.global.js"></script>
+  </head>
+  <body>
+    <div id="app" class="wrapper"></div>
+
+    <script type="module">
+      const { createApp, ref, onMounted, computed } = Vue;
+      const { createRouter, createWebHistory, useRoute } = VueRouter;
+
+      const App = {
+        template: `
+          <header class="header">
+            <router-link to="/" class="logo">
+              <i class="logo__icon fa-brands fa-youtube"></i>
+              Youtube Sync
+            </router-link>
+          </header>
+          <router-view></router-view>
+        `,
+      };
+
+      const HomeView = {
+        template: `
+          <div class="container">
+            <div class="search-container">
+              <h1 class="heading">
+                Sync and Explore YouTube Channels Effortlessly
+              </h1>
+
+              <div class="search">
+                <i class="search__icon fa-brands fa-youtube"></i>
+                <input type="text" class="search__input" placeholder="Channel ID" v-model="channelId" :disabled="isLoading" />
+              </div>
+
+              <button class="btn" @click="syncYoutubeChannel" :disabled="isLoading">
+                <span v-if="isLoading" class="spinner"></span>
+                {{!isLoading ? "Sync Channel" : ""}}
+              </button>
+
+              <div v-if="errorMessage" class="message error">
+              {{ errorMessage }}
+              </div>
+            </div>
+          </div>
+        `,
+        setup() {
+          const channelId = ref("");
+          const isLoading = ref(false);
+          const errorMessage = ref("");
+
+          const syncYoutubeChannel = async () => {
+            isLoading.value = true;
+            errorMessage.value = "";
+            try {
+              const res = await fetch(
+                `http://youtube-sync.test/sync_youtube_channel.php?channelId=${channelId.value}`
+              );
+              const data = await res.json();
+
+              if (data.success) {
+                router.push({
+                  name: "videos",
+                  params: { id: data.channelId },
+                });
+              } else {
+                throw new Error(
+                  `Error synching youtube channel: ${data.message}`
+                );
+              }
+            } catch (error) {
+              console.error(error.message);
+              errorMessage.value = error.message;
+            } finally {
+              isLoading.value = false;
+            }
+          };
+
+          return { channelId, isLoading, syncYoutubeChannel, errorMessage };
+        },
+      };
+
+      const VideosView = {
+        template: `
+          <div class="user">
+            <div class="user__block">
+              <p class="user__name">{{channelData?.channel?.name }}</p>
+
+              <p class="user__description">{{channelData?.channel?.description}}</p>
+            </div>
+
+            <div class="user__profile-container">
+              <img
+                :src="channelData?.channel?.profile_picture"
+                :alt="channelData?.channel?.name"
+                class="user__profile"
+              />
+            </div>
+          </div>
+
+          <ul class="videos">
+            <li class="videos__item" v-for="video in paginatedChannelData">
+              <a :href="video.video_link" class="videos__link">
+                <div class="videos__thumbnail-container">
+                  <img :src="video.thumbnail || 'https://placehold.co/600x400/000000/FFF'" alt="" class="videos__thumbnail" />
+
+                  <i class="videos__play-icon fa-solid fa-play"></i>
+                </div>
+
+                <div class="videos__info">
+                  <p class="videos__title" v-html="video.title"></p>
+                  <p class="videos__description"> {{limitCharacters(video.description, 200)}} </p>
+                </div>
+              </a>
+            </li>
+          </ul>
+          <div class="pagination" v-if="totalPages">
+            <p class="pagination__info">
+              Displaying results for page
+              <span class="pagination__current-page">{{currentPage}}</span> of {{totalPages}}
+            </p>
+
+            <div class="pagination__btn-container">
+              <button
+                class="pagination__btn"
+                @click="prevPage"
+                :disabled="currentPage <= 1"
+              >
+                <i class="fa-solid fa-arrow-left"></i>
+              </button>
+              <button
+                class="pagination__btn"
+                @click="nextPage"
+                :disabled="currentPage >= totalPages"
+              >
+                <i class="fa-solid fa-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        `,
+        setup() {
+          const route = useRoute();
+          const channelId = route.params.id;
+          const channelData = ref({ videos: [] });
+
+          const limitCharacters = (text, maxChars) => {
+            if (text && typeof text === "string" && text.length > maxChars) {
+              return text.slice(0, maxChars) + "...";
+            }
+            return text || "";
+          };
+
+          onMounted(async () => {
+            try {
+              const res = await fetch(
+                `http://youtube-sync.test/youtube_channel_json.php?channelId=${channelId}`
+              );
+              const data = await res.json();
+              channelData.value = data;
+            } catch (error) {
+              console.error("Error fetching channel data", error);
+            }
+          });
+
+          const currentPage = ref(Number(route.query.page) || 1);
+          const itemsPerPage = ref(20);
+
+          const totalPages = computed(() =>
+            Math.ceil(channelData.value.videos.length / itemsPerPage.value)
+          );
+
+          const paginatedChannelData = computed(() => {
+            const start = (currentPage.value - 1) * itemsPerPage.value;
+            return channelData.value.videos?.slice(
+              start,
+              start + itemsPerPage.value
+            );
+          });
+
+          const nextPage = () => {
+            if (currentPage.value < totalPages.value) {
+              currentPage.value++;
+              navigateToPage(currentPage.value);
+            }
+          };
+
+          const prevPage = () => {
+            if (currentPage.value > 1) {
+              currentPage.value--;
+              navigateToPage(currentPage.value);
+            }
+          };
+
+          const navigateToPage = (page) => {
+            router.push({ name: "videos", query: { page } });
+          };
+
+          return {
+            channelData,
+            limitCharacters,
+            currentPage,
+            itemsPerPage,
+            totalPages,
+            paginatedChannelData,
+            nextPage,
+            prevPage,
+          };
+        },
+      };
+
+      const routes = [
+        { path: "/", name: "home", component: HomeView },
+        { path: "/videos/:id", name: "videos", component: VideosView },
+      ];
+
+      const router = createRouter({
+        history: createWebHistory(),
+        routes,
+      });
+
+      const app = createApp(App);
+      app.use(router);
+      app.mount("#app");
+    </script>
+  </body>
+</html>
